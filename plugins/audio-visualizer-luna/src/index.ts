@@ -113,25 +113,42 @@ const initializeAudioVisualizer = async (): Promise<void> => {
 		// attempt audio connection if not already connected
 		if (!isSourceConnected && audioElement !== currentAudioElement) {
 			try {
-				// Create audio source - this might fail if already connected elsewhere
+				// First attempt: Linux-friendly direct tap
 				audioSource = audioContext.createMediaElementSource(audioElement);
 				audioSource.connect(analyser);
-				// CRITICAL: connect back to destination for audio output (otherwise no sound)
 				analyser.connect(audioContext.destination);
 
-				currentAudioElement = audioElement;
-				isSourceConnected = true;
-				log("Connected to audio stream with output");
-			} catch (error) {
-				// Audio is connected elsewhere - that's fine, we just can't visualize
-				if (
-					error instanceof Error &&
-					error.message.includes("already connected")
-				) {
-					log("Audio already connected elsewhere - skipping visualization");
+				log("Connected via MediaElementSource");
+			} catch (err) {
+				log("MediaElementSource failed, attempting captureStream fallback...");
+
+				try {
+					// Windows / macOS / protected media path fix
+					const stream =
+						(audioElement as any).captureStream?.() ||
+						(audioElement as any).mozCaptureStream?.();
+
+					if (!stream) {
+						throw new Error("captureStream not supported");
+					}
+
+					const streamSource =
+						audioContext.createMediaStreamSource(stream);
+
+					streamSource.connect(analyser);
+					analyser.connect(audioContext.destination);
+
+					log("Connected via captureStream");
+				} catch (streamErr) {
+					error("Failed to hook audio for visualization on this platform");
+					console.error(streamErr);
+					return;
 				}
-				return;
 			}
+
+			currentAudioElement = audioElement;
+			isSourceConnected = true;
+
 		}
 
 		// Resume context only if needed and don't wait for it
